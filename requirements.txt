@@ -1,0 +1,5 @@
+langchain-community
+openai
+supabase
+tiktoken
+python-dotenv
