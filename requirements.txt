@@ -1,4 +1,5 @@
 langchain-community
+langchain-openai
 openai
 supabase
 tiktoken
