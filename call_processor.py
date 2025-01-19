@@ -87,7 +87,7 @@ class CallProcessor:
                 "sentiment": "unknown"
             }
 
-    def store_call_data(self, call: Dict, transcript: Dict, analysis: Dict) -> int:
+    def store_call_data(self, call: Dict, transcript_text: str, transcript_data: Dict, analysis: Dict) -> int:
         """Store call data and analysis in Supabase"""
         # Create embeddings for the call summary
         summary_embedding = self.embeddings.embed_query(analysis["summary"])
@@ -97,10 +97,10 @@ class CallProcessor:
             "call_id": call["id"],
             "title": call.get("title", ""),
             "duration": call.get("duration", 0),
-            "start_time": call.get("started", ""),  # Changed from startTime to match Gong API
+            "start_time": call.get("started", ""),
             "summary": analysis["summary"],
             "sentiment": analysis["sentiment"],
-            "transcript": transcript,
+            "transcript": transcript_text,
             "embedding": summary_embedding
         }
 
@@ -111,6 +111,9 @@ class CallProcessor:
             raise Exception("Failed to insert call data")
             
         call_row_id = result.data[0]["id"]
+        
+        # Store transcript segments
+        self.store_transcript_segments(call_row_id, transcript_data)
         
         # Store feature requests
         for feature_request in analysis.get("feature_requests", []):
@@ -152,6 +155,55 @@ class CallProcessor:
                 'query_embedding': query_embedding,
                 'similarity_threshold': threshold,
                 'match_count': limit
+            }
+        ).execute()
+        
+        return result.data
+
+    def store_transcript_segments(self, call_id: int, transcript_data: Dict):
+        """Store individual segments of the transcript with embeddings for granular search"""
+        segments = []
+        
+        # Get the array of transcripts
+        for transcript in transcript_data.get("callTranscripts", []):
+            # Get each speaker's segments
+            for segment in transcript.get("transcript", []):
+                speaker_id = segment.get("speakerId")
+                sentences = segment.get("sentences", [])
+                
+                # Group sentences into meaningful chunks (e.g., by speaker turn)
+                segment_text = " ".join(
+                    sentence.get("text", "") 
+                    for sentence in sentences 
+                    if sentence.get("text")
+                )
+                
+                if segment_text:
+                    # Get timestamp from first sentence
+                    timestamp = sentences[0].get("start") if sentences else None
+                    
+                    segments.append({
+                        "call_id": call_id,
+                        "speaker": speaker_id,
+                        "content": segment_text,
+                        "timestamp": timestamp,
+                        "embedding": self.embeddings.embed_query(segment_text)
+                    })
+        
+        # Batch insert all segments
+        if segments:
+            self.supabase.table("transcript_segments").insert(segments).execute()
+
+    def search_transcript_segments(self, query: str, threshold: float = 0.9, limit: int = 5) -> List[Dict]:
+        """Search for specific moments in transcripts that match the query"""
+        query_embedding = self.embeddings.embed_query(query)
+        
+        result = self.supabase.rpc(
+            'match_transcript_segments',
+            {
+                'query_embedding': query_embedding,
+                'similarity_threshold': threshold,
+                'max_matches': limit
             }
         ).execute()
         

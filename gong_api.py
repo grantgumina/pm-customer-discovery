@@ -55,7 +55,6 @@ class GongAPI:
             total_calls = data.get("records", {}).get("totalRecords")
             current_page_size = data.get("records", {}).get("currentPageSize")
             currentPageNumber = data.get("records", {}).get("currentPageSize")
-            print(f"{current_page_size} of {total_calls} calls retrieved")
                          
             # If no cursor is returned, we've reached the end
             if not cursor:

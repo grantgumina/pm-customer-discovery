@@ -67,8 +67,8 @@ CREATE OR REPLACE FUNCTION match_transcript_segments(
 )
 RETURNS TABLE (
     content TEXT,
-    call_id TEXT,
-    account_id TEXT,
+    call_id BIGINT,
+    speaker TEXT,
     similarity float
 )
 LANGUAGE plpgsql
@@ -77,8 +77,9 @@ BEGIN
     RETURN QUERY
     SELECT
         ts.content,
+        ts.speaker,
+        ts.timestamp,
         ts.call_id,
-        ts.account_id,
         1 - (ts.embedding <=> query_embedding) as similarity
     FROM transcript_segments ts
     WHERE 1 - (ts.embedding <=> query_embedding) > similarity_threshold
