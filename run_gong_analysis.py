@@ -1,37 +1,52 @@
 from dotenv import load_dotenv
 import os
-from gong_api import GongAPI
 from datetime import datetime
+from gong_api import GongAPI
+from call_processor import CallProcessor
+from supabase import create_client
 
 def main():
-    # Load environment variables from .env file
+    # Load environment variables
     load_dotenv()
     
-    # Get credentials from environment variables
-    access_key = os.environ.get("GONG_ACCESS_KEY")
-    access_key_secret = os.environ.get("GONG_ACCESS_KEY_SECRET")
+    # Initialize clients
+    gong = GongAPI(
+        os.environ.get("GONG_ACCESS_KEY"),
+        os.environ.get("GONG_ACCESS_KEY_SECRET")
+    )
     
-    if not access_key or not access_key_secret:
-        raise ValueError("Missing Gong API credentials in .env file")
+    supabase = create_client(
+        os.environ.get("SUPABASE_URL"),
+        os.environ.get("SUPABASE_KEY")
+    )
     
-    # Initialize Gong API client
-    gong = GongAPI(access_key, access_key_secret)
+    processor = CallProcessor(supabase)
 
-    from_date = datetime(2025, 1, 1)
-    to_date = datetime(2025, 1, 17)
-    calls = gong.get_calls(from_date, to_date)
+    # Get calls from Gong
+    # from_date = datetime(2025, 1, 1)
+    # to_date = datetime(2025, 1, 17)
+    # calls = gong.get_calls(from_date, to_date)
 
-    for call in calls:
-        print("Adding the first call to supabase")
-        gong.add_call_to_supabase(call)
-        break
+    # # Process each call
+    # for call in calls:
+    #     if call.get("duration", 0) > 10:  # Skip short calls
+    #         # Get transcript
+    #         transcript = gong.get_transcript(call["id"])
+            
+    #         # Extract and analyze
+    #         transcript_text = processor.extract_transcript_text(transcript)
+    #         analysis = processor.analyze_transcript(transcript_text)
+            
+    #         # Store in database
+    #         processor.store_call_data(call, transcript, analysis)
+    #         break #only process one call for now
 
-    # transcripts = gong.get_transcripts_from_calls(calls)
-    
-    # Process transcripts
-    # print("\nProcessing transcripts...")
-    
-    # print("\nAll done! Your formatted transcripts are ready for LLM analysis.")
+    # Example search
+    results = processor.search_similar_calls("customers requesting Slack integration")
+    for result in results:
+        print(f"\nCall ID: {result['id']}")
+        print(f"Summary: {result['summary']}")
+        print(f"Similarity: {result['similarity']}")
 
 if __name__ == "__main__":
     main() 

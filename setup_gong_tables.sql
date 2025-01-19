@@ -4,36 +4,25 @@ CREATE EXTENSION IF NOT EXISTS vector;
 -- Enum for interaction types
 CREATE TYPE interaction_type AS ENUM ('discovery_call', 'demo', 'follow_up', 'implementation', 'support', 'other');
 
--- Table for storing customer/account information
-CREATE TABLE accounts (
-    id TEXT PRIMARY KEY,
-    name TEXT NOT NULL,
-    industry TEXT,
-    segment TEXT,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-);
-
 -- Table for storing call metadata
 CREATE TABLE calls (
-    id TEXT PRIMARY KEY,
-    account_id TEXT REFERENCES accounts(id),
+    id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    call_id TEXT,
+    account_id TEXT,
     title TEXT,
-    interaction_type interaction_type,
     start_time TIMESTAMP WITH TIME ZONE,
     duration INTEGER,
-    participants JSONB,
     summary TEXT,  -- AI-generated summary of the call
-    key_topics JSONB,  -- AI-extracted key topics
-    sentiment FLOAT,   -- AI-analyzed sentiment score
-    metadata JSONB,
+    sentiment TEXT,   -- AI-analyzed sentiment score
+    transcript TEXT,
+    embedding vector(1536),
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
 -- Table for storing transcript segments with embeddings
 CREATE TABLE transcript_segments (
     id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    call_id TEXT REFERENCES calls(id),
-    account_id TEXT REFERENCES accounts(id),
+    call_id BIGINT REFERENCES calls(id),
     speaker TEXT,
     content TEXT,
     embedding vector(1536),  -- For OpenAI embeddings
@@ -42,24 +31,33 @@ CREATE TABLE transcript_segments (
 );
 
 -- Table for feature mentions and discussions
-CREATE TABLE feature_mentions (
+CREATE TABLE feature_requests (
     id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    call_id TEXT REFERENCES calls(id),
-    account_id TEXT REFERENCES accounts(id),
-    feature_name TEXT,
-    mention_type TEXT,  -- e.g., 'request', 'feedback', 'interest', 'complaint'
-    sentiment FLOAT,
+    call_id BIGINT REFERENCES calls(id),
+    request TEXT,
     context TEXT,
+    priority TEXT,
     timestamp INTEGER,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
 -- Indexes for performance
-CREATE INDEX idx_calls_account ON calls(account_id);
 CREATE INDEX idx_calls_date ON calls(start_time);
 CREATE INDEX idx_transcript_segments_call ON transcript_segments(call_id);
-CREATE INDEX idx_feature_mentions_feature ON feature_mentions(feature_name);
-CREATE INDEX idx_feature_mentions_account ON feature_mentions(account_id);
+CREATE INDEX idx_feature_mentions_feature ON feature_requests(request);
+
+-- Add vector index for calls
+CREATE INDEX IF NOT EXISTS calls_embedding_idx ON calls 
+USING ivfflat (embedding vector_l2_ops)
+WITH (lists = 100);
+
+-- Add vector index for feature_requests
+ALTER TABLE feature_requests 
+ADD COLUMN IF NOT EXISTS embedding vector(1536);
+
+CREATE INDEX IF NOT EXISTS feature_requests_embedding_idx ON feature_requests 
+USING ivfflat (embedding vector_l2_ops)
+WITH (lists = 100);
 
 -- Create a function to search similar segments
 CREATE OR REPLACE FUNCTION match_transcript_segments(
@@ -87,4 +85,34 @@ BEGIN
     ORDER BY ts.embedding <=> query_embedding
     LIMIT max_matches;
 END;
-$$; 
+$$;
+
+-- Add this after your other functions
+create or replace function match_calls (
+  query_embedding vector(1536),
+  similarity_threshold float,
+  match_count int
+)
+returns table (
+  id bigint,
+  title text,
+  summary text,
+  sentiment text,
+  similarity float
+)
+language plpgsql
+as $$
+begin
+  return query
+  select
+    calls.id,
+    calls.title,
+    calls.summary,
+    calls.sentiment,
+    1 - (calls.embedding <=> query_embedding) as similarity
+  from calls
+  where 1 - (calls.embedding <=> query_embedding) > similarity_threshold
+  order by similarity desc
+  limit match_count;
+end;
+$$;
