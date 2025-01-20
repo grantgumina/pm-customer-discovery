@@ -41,6 +41,69 @@ CREATE TABLE feature_requests (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
+-- Function to match summaries
+CREATE OR REPLACE FUNCTION match_summaries (
+    query_embedding vector(1536),
+    match_threshold float,
+    match_limit int
+)
+RETURNS TABLE (
+    id bigint,
+    call_id text,
+    content text,
+    similarity float
+)
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    RETURN QUERY
+    SELECT
+        c.id,
+        c.call_id,
+        c.summary as content,
+        1 - (c.embedding <=> query_embedding) as similarity
+    FROM calls c
+    WHERE 1 - (c.embedding <=> query_embedding) > match_threshold
+    ORDER BY similarity DESC
+    LIMIT match_limit;
+END;
+$$;
+
+-- Function to match feature requests
+CREATE OR REPLACE FUNCTION match_feature_requests (
+    query_embedding vector(1536),
+    match_threshold float,
+    match_limit int
+)
+RETURNS TABLE (
+    id bigint,
+    call_id bigint,
+    request text,
+    context text,
+    priority text,
+    similarity float
+)
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    RETURN QUERY
+    SELECT
+        fr.id,
+        fr.call_id,
+        fr.request,
+        fr.context,
+        fr.priority,
+        1 - (fr.embedding <=> query_embedding) as similarity
+    FROM feature_requests fr
+    WHERE 1 - (fr.embedding <=> query_embedding) > match_threshold
+    ORDER BY similarity DESC
+    LIMIT match_limit;
+END;
+$$;
+
+-- Create indexes for better performance
+CREATE INDEX IF NOT EXISTS idx_feature_requests_call_id ON feature_requests(call_id);
+
 -- Indexes for performance
 CREATE INDEX idx_calls_date ON calls(start_time);
 CREATE INDEX idx_transcript_segments_call ON transcript_segments(call_id);
@@ -100,6 +163,7 @@ returns table (
   title text,
   summary text,
   sentiment text,
+  content text,
   similarity float
 )
 language plpgsql
@@ -111,6 +175,7 @@ begin
     calls.title,
     calls.summary,
     calls.sentiment,
+    calls.transcript as content,
     1 - (calls.embedding <=> query_embedding) as similarity
   from calls
   where 1 - (calls.embedding <=> query_embedding) > similarity_threshold
@@ -118,3 +183,7 @@ begin
   limit match_count;
 end;
 $$;
+
+-- Remove the call_summaries table and its index (if you've already created them)
+DROP TABLE IF EXISTS call_summaries CASCADE;
+DROP INDEX IF EXISTS idx_call_summaries_call_id;

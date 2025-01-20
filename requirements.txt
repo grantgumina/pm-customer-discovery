@@ -1,6 +1,8 @@
 langchain-community
-langchain-openai
+langchain-core
 openai
 supabase
 tiktoken
 python-dotenv
+rich 
+typer

@@ -19,7 +19,7 @@ def main():
         os.environ.get("SUPABASE_URL"),
         os.environ.get("SUPABASE_KEY")
     )
-    
+
     processor = CallProcessor(supabase)
 
     # Example search for transcript segments
@@ -31,11 +31,11 @@ def main():
         print(f"Similarity: {segment['similarity']}")
 
     # # Example search for similar calls
-    # results = processor.search_similar_calls("customers requesting Slack integration")
-    # for result in results:
-    #     print(f"\nCall ID: {result['id']}")
-    #     print(f"Summary: {result['summary']}")
-    #     print(f"Similarity: {result['similarity']}")
+    results = processor.search_similar_calls("customers requesting Slack integration")
+    for result in results:
+        print(f"\nCall ID: {result['id']}")
+        print(f"Summary: {result['summary']}")
+        print(f"Similarity: {result['similarity']}")
 
 if __name__ == "__main__":
     main() 

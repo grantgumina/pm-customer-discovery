@@ -1,5 +1,6 @@
 from typing import List, Dict
-from langchain_openai import ChatOpenAI, OpenAIEmbeddings
+from langchain_openai import ChatOpenAI
+from langchain_openai import OpenAIEmbeddings
 import json
 
 class CallProcessor:
@@ -37,26 +38,6 @@ class CallProcessor:
         
         # Join all lines with newlines
         return "\n".join(transcript_lines)
-
-    # def extract_transcript_details(self, transcript_data: Dict) -> List[Dict]:
-    #     """Extract transcript with speaker and timing details"""
-    #     segments = []
-        
-    #     for transcript in transcript_data.get("callTranscripts", []):
-    #         for segment in transcript.get("transcript", []):
-    #             speaker_id = segment.get("speakerId")
-    #             topic = segment.get("topic")
-                
-    #             for sentence in segment.get("sentences", []):
-    #                 segments.append({
-    #                     "speaker_id": speaker_id,
-    #                     "topic": topic,
-    #                     "text": sentence.get("text", ""),
-    #                     "start_time": sentence.get("start"),
-    #                     "end_time": sentence.get("end")
-    #                 })
-        
-    #     return segments
 
     def analyze_transcript(self, transcript_text: str) -> Dict:
         """Get OpenAI analysis of transcript"""
@@ -208,3 +189,33 @@ class CallProcessor:
         ).execute()
         
         return result.data
+
+    def search_summaries(self, query: str, threshold: float = 0.6, limit: int = 3) -> List[Dict]:
+        """Search through call summaries using semantic search"""
+        query_embedding = self.embeddings.embed_query(query)
+        
+        response = self.supabase.rpc(
+            'match_summaries',  # You'll need to create this function
+            {
+                'query_embedding': query_embedding,
+                'match_threshold': threshold,
+                'match_limit': limit
+            }
+        ).execute()
+        
+        return response.data
+
+    def search_feature_requests(self, query: str, threshold: float = 0.6, limit: int = 3) -> List[Dict]:
+        """Search through feature requests using semantic search"""
+        query_embedding = self.embeddings.embed_query(query)
+        
+        response = self.supabase.rpc(
+            'match_feature_requests',  # You'll need to create this function
+            {
+                'query_embedding': query_embedding,
+                'match_threshold': threshold,
+                'match_limit': limit
+            }
+        ).execute()
+        
+        return response.data
