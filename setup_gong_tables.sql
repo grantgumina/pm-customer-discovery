@@ -184,6 +184,42 @@ begin
 end;
 $$;
 
+-- Function to match calls with title
+create or replace function match_calls_with_title(
+  query_embedding vector(1536),
+  query_text text,
+  similarity_threshold float,
+  match_count int
+)
+returns table (
+  id bigint,
+  title text,
+  summary text,
+  similarity float
+)
+language plpgsql
+as $$
+begin
+  return query
+  select 
+    c.id,
+    c.title,
+    c.summary,
+    (c.embedding <=> query_embedding) as similarity
+  from calls c
+  where 
+    (c.embedding <=> query_embedding) < (1 - similarity_threshold)
+    or c.title ilike '%' || query_text || '%'
+  order by 
+    case 
+      when c.title ilike '%' || query_text || '%' then 0  -- Prioritize title matches
+      else 1
+    end,
+    similarity
+  limit match_count;
+end;
+$$;
+
 -- Remove the call_summaries table and its index (if you've already created them)
 DROP TABLE IF EXISTS call_summaries CASCADE;
 DROP INDEX IF EXISTS idx_call_summaries_call_id;

@@ -116,7 +116,7 @@ class CallProcessor:
         return call_row_id
 
     def search_similar_calls(self, query: str, threshold: float = 0.7, limit: int = 5) -> List[Dict]:
-        """Search for similar calls based on semantic similarity
+        """Search for similar calls based on semantic similarity and title matching
         
         Args:
             query: Search query text
@@ -129,11 +129,12 @@ class CallProcessor:
         # Create embedding for the search query
         query_embedding = self.embeddings.embed_query(query)
         
-        # Perform similarity search using Postgres vector similarity
+        # Perform similarity search using Postgres vector similarity and title matching
         result = self.supabase.rpc(
-            'match_calls',
+            'match_calls_with_title',  # You'll need to create this function
             {
                 'query_embedding': query_embedding,
+                'query_text': query,
                 'similarity_threshold': threshold,
                 'match_count': limit
             }

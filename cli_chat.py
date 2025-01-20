@@ -25,9 +25,9 @@ class ChatCLI:
     def search_calls(self, query: str) -> List[Dict]:
         """Search call transcripts, summaries, and feature requests and return relevant segments"""
         results = {
-            'transcripts': self.call_processor.search_transcript_segments(query, threshold=0.6, limit=2),
-            'summaries': self.call_processor.search_summaries(query, threshold=0.6, limit=2),
-            'features': self.call_processor.search_feature_requests(query, threshold=0.6, limit=2)
+            'transcripts': self.call_processor.search_transcript_segments(query, threshold=0.6, limit=5),
+            'summaries': self.call_processor.search_summaries(query, threshold=0.6, limit=5),
+            'features': self.call_processor.search_feature_requests(query, threshold=0.6, limit=5)
         }
         return results
 
@@ -42,22 +42,30 @@ class ChatCLI:
             context += "📝 Related call summaries:\n\n"
             for summary in results['summaries']:
                 call_id = summary.get('call_id', 'Unknown')
+                title = summary.get('title', 'No title available')
                 content = summary.get('content', summary.get('summary', 'No content available'))
-                context += f"Call {call_id}:\n{content}\n\n"
+                context += f"Call {call_id} - {title}:\n{content}\n\n"
         
         if results['transcripts']:
             context += "🎯 Relevant transcript segments:\n\n"
             for segment in results['transcripts']:
                 call_id = segment.get('call_id', 'Unknown')
+                title = segment.get('title', 'No title available')
                 content = segment.get('content', segment.get('transcript', 'No content available'))
-                context += f"Call {call_id}:\n{content}\n\n"
+                context += f"Call {call_id} - {title}:\n{content}\n\n"
             
         if results['features']:
             context += "✨ Related feature requests:\n\n"
             for feature in results['features']:
                 feature_id = feature.get('id', 'Unknown')
-                content = feature.get('content', feature.get('request', 'No content available'))
-                context += f"Request {feature_id}:\n{content}\n\n"
+                request = feature.get('request', 'No request available')
+                customer_context = feature.get('context', 'No context available')
+                priority = feature.get('priority', 'Unknown priority')
+                
+                context += f"Request {feature_id}:\n"
+                context += f"Feature: {request}\n"
+                context += f"Customer Quote: \"{customer_context}\"\n"
+                context += f"Priority: {priority}\n\n"
             
         return context.strip()
 
