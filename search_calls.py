@@ -3,6 +3,7 @@ import os
 from datetime import datetime
 from gong_api import GongAPI
 from call_processor import CallProcessor
+from call_searcher import CallSearcher
 from supabase import create_client
 
 def main():
@@ -21,9 +22,11 @@ def main():
     )
 
     processor = CallProcessor(supabase)
+    searcher = CallSearcher(supabase)
+
 
     # Example search for transcript segments
-    segments = processor.search_transcript_segments(query="pricing", threshold=0.9, limit=3)
+    segments = searcher.search_transcript_segments(query="pricing", threshold=0.9, limit=3)
     for segment in segments:
         print(f"\nFrom call: {segment['call_id']}")
         print(f"Speaker: {segment['speaker']} said:")
@@ -31,7 +34,7 @@ def main():
         print(f"Similarity: {segment['similarity']}")
 
     # # Example search for similar calls
-    results = processor.search_similar_calls("customers requesting Slack integration")
+    results = searcher.search_similar_calls("customers requesting Slack integration")
     for result in results:
         print(f"\nCall ID: {result['id']}")
         print(f"Summary: {result['summary']}")

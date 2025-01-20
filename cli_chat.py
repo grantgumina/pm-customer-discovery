@@ -7,13 +7,13 @@ from rich.prompt import Prompt
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
 from supabase import create_client
-from call_processor import CallProcessor
+from call_searcher import CallSearcher
 from dotenv import load_dotenv
 import os
 
 class ChatCLI:
-    def __init__(self, call_processor):
-        self.call_processor = call_processor
+    def __init__(self, call_searcher):
+        self.call_searcher = call_searcher
         self.console = Console()
         self.chat = ChatOpenAI(temperature=0.7)
         self.conversation_history = [
@@ -25,9 +25,9 @@ class ChatCLI:
     def search_calls(self, query: str) -> List[Dict]:
         """Search call transcripts, summaries, and feature requests and return relevant segments"""
         results = {
-            'transcripts': self.call_processor.search_transcript_segments(query, threshold=0.6, limit=5),
-            'summaries': self.call_processor.search_summaries(query, threshold=0.6, limit=5),
-            'features': self.call_processor.search_feature_requests(query, threshold=0.6, limit=5)
+            'transcripts': self.call_searcher.search_transcript_segments(query, threshold=0.6, limit=5),
+            'summaries': self.call_searcher.search_summaries(query, threshold=0.6, limit=5),
+            'features': self.call_searcher.search_feature_requests(query, threshold=0.6, limit=5)
         }
         return results
 
@@ -119,9 +119,9 @@ def main():
 
     # Initialize your CallProcessor here
     
-    call_processor = CallProcessor(supabase)  # Add your necessary init parameters
+    call_searcher = CallSearcher(supabase)  # Add your necessary init parameters
     
-    chat_cli = ChatCLI(call_processor)
+    chat_cli = ChatCLI(call_searcher)
     chat_cli.chat_loop()
 
 if __name__ == "__main__":
