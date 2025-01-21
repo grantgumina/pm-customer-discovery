@@ -2,6 +2,7 @@ from typing import List, Dict
 from langchain_openai import ChatOpenAI
 from langchain_openai import OpenAIEmbeddings
 import json
+from langchain.text_splitter import RecursiveCharacterTextSplitter
 
 class CallProcessor:
     """Process and analyze call data"""
@@ -9,6 +10,11 @@ class CallProcessor:
         self.supabase = supabase_client
         self.llm = ChatOpenAI(temperature=0)
         self.embeddings = OpenAIEmbeddings()
+        self.text_splitter = RecursiveCharacterTextSplitter(
+            chunk_size=12000,  # Characters, not tokens, but a safe size
+            chunk_overlap=1000,
+            length_function=len
+        )
 
     def extract_transcript_text(self, transcript_data: Dict) -> str:
         """Extract all sentences from a transcript with speaker identification"""
@@ -41,32 +47,52 @@ class CallProcessor:
 
     def analyze_transcript(self, transcript_text: str) -> Dict:
         """Get OpenAI analysis of transcript"""
-        prompt = """Analyze this call transcript and provide the following in JSON format:
-        {
-            "summary": "Brief summary of key points discussed",
-            "feature_requests": [
-                {
-                    "request": "Description of feature request",
-                    "context": "The exact conversation sentences said around this request",
-                    "priority": "High/Medium/Low based on customer emphasis"
-                }
-            ],
-            "sentiment": "Overall sentiment about the product (positive, negative, neutral)"
-        }
-
-        Transcript:
-        """ + transcript_text
-
-        try:
-            response = self.llm.invoke(prompt)
-            return json.loads(response.content)
-        except Exception as e:
-            print(f"Error analyzing transcript: {str(e)}")
-            return {
-                "summary": "",
-                "feature_requests": [],
-                "sentiment": "unknown"
+        # Split long transcripts into chunks
+        chunks = self.text_splitter.split_text(transcript_text)
+        
+        # Analyze each chunk
+        all_analyses = []
+        for chunk in chunks:
+            prompt = """Analyze this segment of a call transcript and provide the following in JSON format:
+            {
+                "summary": "Brief summary of key points discussed",
+                "feature_requests": [
+                    {
+                        "request": "Description of feature request",
+                        "context": "The exact conversation sentences said around this request",
+                        "priority": "High/Medium/Low based on customer emphasis"
+                    }
+                ],
+                "sentiment": "Overall sentiment about the product (positive, negative, neutral)"
             }
+
+            Transcript segment:
+            """ + chunk
+
+            try:
+                response = self.llm.invoke(prompt)
+                analysis = json.loads(response.content)
+                all_analyses.append(analysis)
+            except Exception as e:
+                print(f"Error analyzing chunk: {str(e)}")
+
+        # Combine analyses
+        combined_analysis = {
+            "summary": " ".join(a["summary"] for a in all_analyses),
+            "feature_requests": sum((a["feature_requests"] for a in all_analyses), []),
+            "sentiment": self._combine_sentiments([a["sentiment"] for a in all_analyses])
+        }
+        
+        return combined_analysis
+
+    def _combine_sentiments(self, sentiments: List[str]) -> str:
+        """Combine multiple sentiment analyses into one"""
+        sentiment_counts = {
+            "positive": sentiments.count("positive"),
+            "negative": sentiments.count("negative"),
+            "neutral": sentiments.count("neutral")
+        }
+        return max(sentiment_counts, key=sentiment_counts.get)
 
     def store_call_data(self, call: Dict, transcript_text: str, transcript_data: Dict, analysis: Dict) -> int:
         """Store call data and analysis in Supabase"""

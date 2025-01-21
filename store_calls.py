@@ -23,8 +23,8 @@ def main():
     processor = CallProcessor(supabase)
 
     # Get calls from Gong
-    from_date = datetime(2025, 1, 1)
-    to_date = datetime(2025, 1, 17)
+    from_date = datetime(2024, 10, 1)
+    to_date = datetime(2024, 12, 31)
     calls = gong.get_calls(from_date, to_date)
 
     # Process each call
@@ -36,13 +36,12 @@ def main():
             # Extract and analyze
             transcript_text = processor.extract_transcript_text(transcript_data)
 
-            print(transcript_text)
-
             analysis = processor.analyze_transcript(transcript_text)
             
             # Store in database
             processor.store_call_data(call, transcript_text, transcript_data, analysis)
-            break #only process one call for now
+
+            print(f"Processed call {call['id']}")
 
 if __name__ == "__main__":
     main() 

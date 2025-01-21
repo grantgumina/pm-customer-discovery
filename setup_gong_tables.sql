@@ -56,6 +56,7 @@ RETURNS TABLE (
 LANGUAGE plpgsql
 AS $$
 BEGIN
+    SET LOCAL statement_timeout = '10s';  -- Add 10-second timeout
     RETURN QUERY
     SELECT
         c.id,
@@ -86,6 +87,7 @@ RETURNS TABLE (
 LANGUAGE plpgsql
 AS $$
 BEGIN
+    SET LOCAL statement_timeout = '10s';  -- Add 10-second timeout
     RETURN QUERY
     SELECT
         fr.id,
@@ -109,10 +111,18 @@ CREATE INDEX idx_calls_date ON calls(start_time);
 CREATE INDEX idx_transcript_segments_call ON transcript_segments(call_id);
 CREATE INDEX idx_feature_mentions_feature ON feature_requests(request);
 
--- Add vector index for calls
-CREATE INDEX IF NOT EXISTS calls_embedding_idx ON calls 
+-- Drop and recreate indexes with better parameters
+DROP INDEX IF EXISTS calls_embedding_idx;
+CREATE INDEX calls_embedding_idx ON calls 
 USING ivfflat (embedding vector_l2_ops)
-WITH (lists = 100);
+WITH (lists = 1000);  -- More lists for better search performance
+
+-- Remove clustering command since ivfflat doesn't support it
+-- Just analyze the table to update statistics
+ANALYZE calls;
+
+-- Add a regular B-tree index on created_at for date filtering
+CREATE INDEX idx_calls_created_at ON calls(start_time);
 
 -- Add vector index for feature_requests
 ALTER TABLE feature_requests 
@@ -122,11 +132,27 @@ CREATE INDEX IF NOT EXISTS feature_requests_embedding_idx ON feature_requests
 USING ivfflat (embedding vector_l2_ops)
 WITH (lists = 100);
 
--- Create a function to search similar segments
+-- First, drop and recreate the transcript segments index with better parameters
+DROP INDEX IF EXISTS transcript_segments_embedding_idx;
+CREATE INDEX transcript_segments_embedding_idx ON transcript_segments 
+USING ivfflat (embedding vector_l2_ops)
+WITH (lists = 1000);  -- Increase lists for better search performance
+
+-- Remove clustering command
+ANALYZE transcript_segments;
+
+-- Add date-based index
+CREATE INDEX idx_transcript_segments_created ON transcript_segments(created_at);
+
+-- Drop the old function first
+DROP FUNCTION IF EXISTS match_transcript_segments;
+
+-- Create the updated function with correct parameters
 CREATE OR REPLACE FUNCTION match_transcript_segments(
     query_embedding vector(1536),
     similarity_threshold float,
-    max_matches int
+    max_matches int,
+    start_date timestamp default null  -- Make sure this parameter exists
 )
 RETURNS TABLE (
     content TEXT,
@@ -138,6 +164,7 @@ RETURNS TABLE (
 LANGUAGE plpgsql
 AS $$
 BEGIN
+    SET LOCAL statement_timeout = '15s';
     RETURN QUERY
     SELECT
         ts.content,
@@ -147,79 +174,146 @@ BEGIN
         1 - (ts.embedding <=> query_embedding) as similarity
     FROM transcript_segments ts
     WHERE 1 - (ts.embedding <=> query_embedding) > similarity_threshold
-    ORDER BY ts.embedding <=> query_embedding
+        AND (start_date IS NULL OR ts.created_at >= start_date)
+    ORDER BY similarity DESC
     LIMIT max_matches;
 END;
 $$;
 
 -- Add this after your other functions
-create or replace function match_calls (
-  query_embedding vector(1536),
-  similarity_threshold float,
-  match_count int
+CREATE OR REPLACE FUNCTION match_calls (
+    query_embedding vector(1536),
+    similarity_threshold float,
+    match_count int,
+    start_date timestamp default null  -- Optional date filter
 )
-returns table (
-  id bigint,
-  title text,
-  summary text,
-  sentiment text,
-  content text,
-  similarity float
+RETURNS TABLE (
+    id bigint,
+    title text,
+    summary text,
+    sentiment text,
+    content text,
+    similarity float
 )
-language plpgsql
-as $$
-begin
-  return query
-  select
-    calls.id,
-    calls.title,
-    calls.summary,
-    calls.sentiment,
-    calls.transcript as content,
-    1 - (calls.embedding <=> query_embedding) as similarity
-  from calls
-  where 1 - (calls.embedding <=> query_embedding) > similarity_threshold
-  order by similarity desc
-  limit match_count;
-end;
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    SET LOCAL statement_timeout = '10s';
+    RETURN QUERY
+    SELECT
+        calls.id,
+        calls.title,
+        calls.summary,
+        calls.sentiment,
+        calls.transcript as content,
+        1 - (calls.embedding <=> query_embedding) as similarity
+    FROM calls
+    WHERE 1 - (calls.embedding <=> query_embedding) > similarity_threshold
+        AND (start_date IS NULL OR calls.created_at >= start_date)
+    ORDER BY similarity DESC
+    LIMIT match_count;
+END;
 $$;
 
 -- Function to match calls with title
-create or replace function match_calls_with_title(
+CREATE OR REPLACE FUNCTION match_calls_with_title(
   query_embedding vector(1536),
   query_text text,
   similarity_threshold float,
   match_count int
 )
-returns table (
+RETURNS TABLE (
   id bigint,
   title text,
   summary text,
   similarity float
 )
-language plpgsql
-as $$
-begin
-  return query
-  select 
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  RETURN QUERY
+  SELECT
     c.id,
     c.title,
     c.summary,
     (c.embedding <=> query_embedding) as similarity
-  from calls c
-  where 
+  FROM calls c
+  WHERE 
     (c.embedding <=> query_embedding) < (1 - similarity_threshold)
     or c.title ilike '%' || query_text || '%'
-  order by 
+  ORDER BY 
     case 
       when c.title ilike '%' || query_text || '%' then 0  -- Prioritize title matches
       else 1
     end,
     similarity
-  limit match_count;
-end;
+  LIMIT match_count;
+END;
+$$;
+
+-- Add a new function to match feature requests with date filtering
+CREATE OR REPLACE FUNCTION match_recent_feature_requests(
+    query_embedding vector(1536),
+    match_threshold float,
+    match_limit int,
+    start_date timestamp
+)
+RETURNS TABLE (
+    id bigint,
+    call_id bigint,
+    request text,
+    context text,
+    priority text,
+    similarity float
+)
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    SET LOCAL statement_timeout = '10s';
+    RETURN QUERY
+    SELECT
+        fr.id,
+        fr.call_id,
+        fr.request,
+        fr.context,
+        fr.priority,
+        1 - (fr.embedding <=> query_embedding) as similarity
+    FROM feature_requests fr
+    JOIN calls c ON fr.call_id = c.id
+    WHERE 
+        c.created_at >= start_date  -- Add date filter
+        AND 1 - (fr.embedding <=> query_embedding) > match_threshold
+    ORDER BY similarity DESC
+    LIMIT match_limit;
+END;
 $$;
 
 -- Remove the call_summaries table and its index (if you've already created them)
 DROP TABLE IF EXISTS call_summaries CASCADE;
 DROP INDEX IF EXISTS idx_call_summaries_call_id;
+
+-- Add better indexes for vector searches
+ALTER TABLE calls 
+SET (autovacuum_vacuum_scale_factor = 0.0);
+
+ALTER TABLE calls 
+SET (autovacuum_vacuum_threshold = 5000);
+
+-- Same for feature_requests
+ALTER TABLE feature_requests 
+SET (autovacuum_vacuum_scale_factor = 0.0);
+
+ALTER TABLE feature_requests 
+SET (autovacuum_vacuum_threshold = 5000);
+
+DROP INDEX IF EXISTS calls_embedding_idx;
+CREATE INDEX calls_embedding_idx ON calls 
+USING ivfflat (embedding vector_l2_ops)
+WITH (lists = 1000);  -- More lists for better search performance
+
+-- Remove clustering command since ivfflat doesn't support it
+-- Just analyze the table to update statistics
+ANALYZE calls;
+
+-- Add a regular B-tree index on created_at for date filtering
+CREATE INDEX idx_calls_created_at ON calls(start_time);

@@ -18,16 +18,35 @@ class ChatCLI:
         self.chat = ChatOpenAI(temperature=0.7)
         self.conversation_history = [
             SystemMessage(content="""You are a helpful AI assistant with access to call transcript data. 
-            When answering questions, use the context from call transcripts when provided, but you can also 
-            answer general questions. Always be clear about what information comes from calls versus your general knowledge.""")
+            When answering questions, use the context from call transcripts when provided, and avoid answering general questions. 
+            Always be clear about what information comes from calls versus your general knowledge.
+            
+            When answering questions where you list out information, please format the output
+            as bullet points so it's easy to read.
+            
+            IMPORTANT: At the end of each response, include a "Sources:" section that lists all the calls
+            you referenced in your answer. Format it like this:
+
+            Sources:
+            - Call {call_id} - {title}
+            - Call {call_id} - {title}
+            """)
         ]
 
-    def search_calls(self, query: str) -> List[Dict]:
-        """Search call transcripts, summaries, and feature requests and return relevant segments"""
+    def search_calls(self, query: str, use_date_filter: bool = None) -> List[Dict]:
+        """Search call transcripts, summaries, and feature requests"""
         results = {
-            'transcripts': self.call_searcher.search_transcript_segments(query, threshold=0.6, limit=5),
-            'summaries': self.call_searcher.search_summaries(query, threshold=0.6, limit=5),
-            'features': self.call_searcher.search_feature_requests(query, threshold=0.6, limit=5)
+            'transcripts': [],
+            'summaries': self.call_searcher.search_summaries(
+                query, 
+                threshold=0.5,
+                limit=5,
+            ),
+            'features': self.call_searcher.search_feature_requests(
+                query, 
+                threshold=0.5,
+                limit=5,
+            )
         }
         return results
 
@@ -69,20 +88,53 @@ class ChatCLI:
             
         return context.strip()
 
+    def format_response(self, response_content: str, results: Dict[str, List[Dict]]) -> str:
+        """Add citations if they're not already present"""
+        if "Sources:" not in response_content:
+            sources = set()  # Use set to avoid duplicates
+            
+            # Collect unique call references from all result types
+            for result_type in ['summaries', 'transcripts', 'features']:
+                for item in results.get(result_type, []):
+                    call_id = item.get('call_id', 'Unknown')
+                    title = item.get('title', 'No title available')
+                    sources.add(f"- Call {call_id} - {title}")
+            
+            if sources:
+                response_content += "\n\nSources:\n" + "\n".join(sorted(sources))
+            
+        return response_content
+
     def chat_loop(self):
         """Main chat loop"""
-        self.console.print(Panel("Welcome to Call Explorer! Ask me anything about your calls.", 
-                               title="🤖 Call Explorer", 
-                               border_style="blue"))
+        self.console.print(Panel(
+            "Welcome to Call Explorer! Ask me anything about your calls.\n"
+            "Commands:\n"
+            "- /all - Search all time\n"
+            "- /recent - Search recent calls only (default)\n"
+            "- /quit - Exit the program", 
+            title="🤖 Call Explorer", 
+            border_style="blue"
+        ))
         
         while True:
             try:
-                # Get user input
                 user_input = Prompt.ask("\n[bold blue]You")
                 
-                if user_input.lower() in ['quit', 'exit', 'bye']:
+                if user_input.lower() in ['quit', 'exit', 'bye', '/quit']:
                     self.console.print("\n[bold green]Goodbye! 👋")
                     break
+
+                # Handle commands
+                if user_input == '/all':
+                    self.call_searcher.default_date_filter = False
+                    self.console.print("[yellow]Searching all time periods")
+                    continue
+                    
+                if user_input == '/recent':
+                    self.call_searcher.default_date_filter = True
+                    self.console.print("[yellow]Searching recent calls only")
+                    continue
 
                 # Search for relevant call segments
                 segments = self.search_calls(user_input)
@@ -95,6 +147,10 @@ class ChatCLI:
 
                 # Get AI response
                 response = self.chat.invoke(self.conversation_history)
+                
+                # Add citations if needed
+                response.content = self.format_response(response.content, segments)
+                
                 self.conversation_history.append(response)
 
                 # Display response with markdown formatting
@@ -119,7 +175,7 @@ def main():
 
     # Initialize your CallProcessor here
     
-    call_searcher = CallSearcher(supabase)  # Add your necessary init parameters
+    call_searcher = CallSearcher(supabase)
     
     chat_cli = ChatCLI(call_searcher)
     chat_cli.chat_loop()
