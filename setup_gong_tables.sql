@@ -41,8 +41,8 @@ CREATE TABLE feature_requests (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
--- Function to match summaries
-CREATE OR REPLACE FUNCTION match_summaries (
+-- Drop and recreate match_summaries function with explicit column references
+CREATE OR REPLACE FUNCTION match_summaries(
     query_embedding vector(1536),
     match_threshold float,
     match_limit int
@@ -50,20 +50,22 @@ CREATE OR REPLACE FUNCTION match_summaries (
 RETURNS TABLE (
     id bigint,
     call_id text,
+    title text,
     content text,
     similarity float
 )
 LANGUAGE plpgsql
 AS $$
 BEGIN
-    SET LOCAL statement_timeout = '10s';  -- Add 10-second timeout
+    SET LOCAL statement_timeout = '10s';
     RETURN QUERY
     SELECT
-        c.id,
+        c.id,                -- Explicitly reference calls table
         c.call_id,
+        c.title,
         c.summary as content,
         1 - (c.embedding <=> query_embedding) as similarity
-    FROM calls c
+    FROM calls c            -- Use table alias consistently
     WHERE 1 - (c.embedding <=> query_embedding) > match_threshold
     ORDER BY similarity DESC
     LIMIT match_limit;
@@ -132,27 +134,24 @@ CREATE INDEX IF NOT EXISTS feature_requests_embedding_idx ON feature_requests
 USING ivfflat (embedding vector_l2_ops)
 WITH (lists = 100);
 
--- First, drop and recreate the transcript segments index with better parameters
+-- First, drop existing indexes
 DROP INDEX IF EXISTS transcript_segments_embedding_idx;
-CREATE INDEX transcript_segments_embedding_idx ON transcript_segments 
+DROP INDEX IF EXISTS idx_transcript_segments_created;
+
+-- Create a more efficient composite index
+CREATE INDEX transcript_segments_embedding_created_idx ON transcript_segments 
 USING ivfflat (embedding vector_l2_ops)
-WITH (lists = 1000);  -- Increase lists for better search performance
+WITH (lists = 100);  -- Reduced lists for faster searches
 
--- Remove clustering command
-ANALYZE transcript_segments;
+-- Regular B-tree index for date filtering
+CREATE INDEX idx_transcript_segments_created_call ON transcript_segments(created_at, call_id);
 
--- Add date-based index
-CREATE INDEX idx_transcript_segments_created ON transcript_segments(created_at);
-
--- Drop the old function first
-DROP FUNCTION IF EXISTS match_transcript_segments;
-
--- Create the updated function with correct parameters
+-- Update the search function to be more efficient
 CREATE OR REPLACE FUNCTION match_transcript_segments(
     query_embedding vector(1536),
     similarity_threshold float,
     max_matches int,
-    start_date timestamp default null  -- Make sure this parameter exists
+    start_date timestamp default null
 )
 RETURNS TABLE (
     content TEXT,
@@ -164,7 +163,7 @@ RETURNS TABLE (
 LANGUAGE plpgsql
 AS $$
 BEGIN
-    SET LOCAL statement_timeout = '15s';
+    SET LOCAL statement_timeout = '5s';  -- Reduced timeout
     RETURN QUERY
     SELECT
         ts.content,
@@ -173,9 +172,13 @@ BEGIN
         ts.timestamp,
         1 - (ts.embedding <=> query_embedding) as similarity
     FROM transcript_segments ts
-    WHERE 1 - (ts.embedding <=> query_embedding) > similarity_threshold
-        AND (start_date IS NULL OR ts.created_at >= start_date)
-    ORDER BY similarity DESC
+    WHERE 
+        CASE 
+            WHEN start_date IS NOT NULL THEN ts.created_at >= start_date
+            ELSE true
+        END
+        AND 1 - (ts.embedding <=> query_embedding) > similarity_threshold
+    ORDER BY ts.embedding <=> query_embedding
     LIMIT max_matches;
 END;
 $$;

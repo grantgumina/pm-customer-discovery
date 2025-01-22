@@ -51,33 +51,39 @@ class CallSearcher:
         start_date = datetime.now() - timedelta(days=90) if use_date_filter else None
         
         results = []
-        batch_size = 2
+        batch_size = 1  # Reduced batch size
+        retries = 2     # Add retries
 
         for offset in range(0, limit, batch_size):
-            try:
-                params = {
-                    'query_embedding': query_embedding,
-                    'similarity_threshold': threshold,
-                    'max_matches': batch_size
-                }
-                # Only add start_date if it exists
-                if start_date:
-                    params['start_date'] = start_date.isoformat()
+            retry_count = 0
+            while retry_count < retries:
+                try:
+                    params = {
+                        'query_embedding': query_embedding,
+                        'similarity_threshold': threshold + (0.1 * retry_count),  # Increase threshold on retries
+                        'max_matches': batch_size
+                    }
+                    if start_date:
+                        params['start_date'] = start_date.isoformat()
+                        
+                    batch = self.supabase.rpc(
+                        'match_transcript_segments',
+                        params
+                    ).execute()
                     
-                batch = self.supabase.rpc(
-                    'match_transcript_segments',
-                    params
-                ).execute()
-                
-                if batch.data:
-                    results.extend(batch.data)
-                
-                if len(batch.data) < batch_size:
-                    break
+                    if batch.data:
+                        results.extend(batch.data)
+                        break  # Success, exit retry loop
                     
-            except Exception as e:
-                print(f"Error in transcript segment batch at {offset}: {str(e)}")
-                continue
+                    if len(batch.data) < batch_size:
+                        break
+                        
+                except Exception as e:
+                    print(f"Error in batch {offset} (attempt {retry_count + 1}): {str(e)}")
+                    retry_count += 1
+                    if retry_count == retries:
+                        print("Skipping batch after all retries failed")
+                    continue
 
         results.sort(key=lambda x: x.get('similarity', 0), reverse=True)
         return results[:limit]
@@ -90,6 +96,7 @@ class CallSearcher:
 
         for offset in range(0, limit, batch_size):
             try:
+                # Just use match_summaries directly
                 batch = self.supabase.rpc(
                     'match_summaries',
                     {

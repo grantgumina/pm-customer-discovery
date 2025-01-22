@@ -21,6 +21,12 @@ class ChatCLI:
             When answering questions, use the context from call transcripts when provided, and avoid answering general questions. 
             Always be clear about what information comes from calls versus your general knowledge.
             
+            IMPORTANT: When users ask about specific companies or customers:
+            1. First check if there are any calls with matching titles
+            2. If you find matching titles, mention them explicitly: "I found X calls involving [company]..."
+            3. Then provide relevant details from the call content
+            4. If you don't find any matching titles or content, say so explicitly
+
             When answering questions where you list out information, please format the output
             as bullet points so it's easy to read.
             
@@ -89,15 +95,23 @@ class ChatCLI:
         return context.strip()
 
     def format_response(self, response_content: str, results: Dict[str, List[Dict]]) -> str:
-        """Add citations if they're not already present"""
+        """Add citations only for sources actually referenced in the response"""
         if "Sources:" not in response_content:
             sources = set()  # Use set to avoid duplicates
             
-            # Collect unique call references from all result types
+            # Collect all possible call IDs and titles
+            all_sources = {}  # Dictionary of call_id -> title
             for result_type in ['summaries', 'transcripts', 'features']:
                 for item in results.get(result_type, []):
                     call_id = item.get('call_id', 'Unknown')
                     title = item.get('title', 'No title available')
+                    all_sources[call_id] = title
+            
+            # Only include sources that are actually mentioned in the response
+            for call_id, title in all_sources.items():
+                # Check if the call_id or company name from title appears in the response
+                if (str(call_id) in response_content or 
+                    any(company in response_content for company in title.split('|'))):
                     sources.add(f"- Call {call_id} - {title}")
             
             if sources:
@@ -136,21 +150,21 @@ class ChatCLI:
                     self.console.print("[yellow]Searching recent calls only")
                     continue
 
-                # Search for relevant call segments
+                # Search for relevant call segments and create context for AI
                 segments = self.search_calls(user_input)
                 context = self.format_context(segments)
 
-                # Add context and user query to conversation
+                # Combine found context and user's question to conversation
                 self.conversation_history.append(HumanMessage(
                     content=f"Context from calls:\n{context}\n\nUser question: {user_input}"
                 ))
 
-                # Get AI response
+                # Send conversation to AI for a response
                 response = self.chat.invoke(self.conversation_history)
                 
                 # Add citations if needed
                 response.content = self.format_response(response.content, segments)
-                
+
                 self.conversation_history.append(response)
 
                 # Display response with markdown formatting
