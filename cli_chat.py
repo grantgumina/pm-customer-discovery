@@ -15,27 +15,19 @@ class ChatCLI:
     def __init__(self, call_searcher):
         self.call_searcher = call_searcher
         self.console = Console()
-        self.chat = ChatOpenAI(temperature=0.7)
+        self.chat = ChatOpenAI(temperature=1)
         self.conversation_history = [
-            SystemMessage(content="""You are a helpful AI assistant with access to call transcript data. 
-            When answering questions, use the context from call transcripts when provided, and avoid answering general questions. 
-            Always be clear about what information comes from calls versus your general knowledge.
+            SystemMessage(content="""You are a helpful AI assistant with access to call summaries, transcripts, and feature request data. 
+            When answering questions, use the context provided. Always be clear about what information comes from calls versus your general knowledge.
             
             IMPORTANT: When users ask about specific companies or customers:
-            1. First check if there are any calls with matching titles
-            2. If you find matching titles, mention them explicitly: "I found X calls involving [company]..."
-            3. Then provide relevant details from the call content
-            4. If you don't find any matching titles or content, say so explicitly
+            1. First check if there are any calls with titles that contain the company name. If you find matching titles, mention them explicitly: "I found X calls involving [company]...".
+            2. Second, check if there are any calls whose IDs match the ID provided. If you find matching IDs, mention them explicitly: "I found X calls involving [company]...".
+            3. Then provide relevant details from the call summary
+            4. If you don't find any matching titles or summaries, say so explicitly
 
             When answering questions where you list out information, please format the output
             as bullet points so it's easy to read.
-            
-            IMPORTANT: At the end of each response, include a "Sources:" section that lists all the calls
-            you referenced in your answer. Format it like this:
-
-            Sources:
-            - Call {call_id} - {title}
-            - Call {call_id} - {title}
             """)
         ]
 
@@ -45,15 +37,33 @@ class ChatCLI:
             'transcripts': [],
             'summaries': self.call_searcher.search_summaries(
                 query, 
-                threshold=0.5,
-                limit=5,
+                threshold=0.8,
+                limit=10,
             ),
+            # 'features': [],
             'features': self.call_searcher.search_feature_requests(
                 query, 
-                threshold=0.5,
-                limit=5,
+                threshold=0.8,
+                limit=10,
             )
         }
+
+        # # Another option would be to search for summaries first, then search for feature requests for the found calls
+        # # Get call IDs from summaries
+        # summary_call_ids = [summary.get('call_id') for summary in results['summaries'] if summary.get('call_id')]
+
+        # # Search for feature requests for each call ID
+        # for call_id in summary_call_ids:
+        #     feature_results = self.call_searcher.search_feature_requests(
+        #         call_id,
+        #         threshold=0.3,  # Lower threshold since we want exact matches
+        #         limit=5
+        #     )
+        #     # Add any new feature requests found
+        #     results['features'].extend([
+        #         fr for fr in feature_results 
+        #         if fr not in results['features']  # Avoid duplicates
+        #     ])
         return results
 
     def format_context(self, results: Dict[str, List[Dict]]) -> str:
@@ -69,7 +79,7 @@ class ChatCLI:
                 call_id = summary.get('call_id', 'Unknown')
                 title = summary.get('title', 'No title available')
                 content = summary.get('content', summary.get('summary', 'No content available'))
-                context += f"Call {call_id} - {title}:\n{content}\n\n"
+                context += f"Call ID: {call_id}\nTitle: {title}\nSummary: {content}\n\n"
         
         if results['transcripts']:
             context += "🎯 Relevant transcript segments:\n\n"

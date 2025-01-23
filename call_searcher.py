@@ -12,34 +12,6 @@ class CallSearcher:
         self.embeddings = OpenAIEmbeddings()
         self.default_date_filter = True  # Add this flag
 
-    def search_similar_calls(self, query: str, threshold: float = 0.7, limit: int = 5) -> List[Dict]:
-        """Search for similar calls based on semantic similarity and title matching
-        
-        Args:
-            query: Search query text
-            threshold: Minimum similarity score (0-1) to include in results
-            limit: Maximum number of results to return
-            
-        Returns:
-            List of matching call dictionaries with similarity scores
-        """
-        # Create embedding for the search query
-        query_embedding = self.embeddings.embed_query(query)
-        
-        # Perform similarity search using Postgres vector similarity and title matching
-        result = self.supabase.rpc(
-            'match_calls_with_title',  # You'll need to create this function
-            {
-                'query_embedding': query_embedding,
-                'query_text': query,
-                'similarity_threshold': threshold,
-                'match_count': limit
-            }
-        ).execute()
-        
-        return result.data
-
-
     def search_transcript_segments(self, query: str, threshold: float = 0.5, limit: int = 5, use_date_filter: bool = None) -> List[Dict]:
         """Search transcript segments in batches with optional date filtering"""
         query_embedding = self.embeddings.embed_query(query)
@@ -89,68 +61,71 @@ class CallSearcher:
         return results[:limit]
 
     def search_summaries(self, query: str, threshold: float = 0.5, limit: int = 5) -> List[Dict]:
-        """Search call summaries in batches"""
+        """Search call summaries"""
         query_embedding = self.embeddings.embed_query(query)
-        results = []
-        batch_size = 2
-
-        for offset in range(0, limit, batch_size):
-            try:
-                # Just use match_summaries directly
-                batch = self.supabase.rpc(
-                    'match_summaries',
-                    {
-                        'query_embedding': query_embedding,
-                        'match_threshold': threshold,
-                        'match_limit': batch_size
-                    }
-                ).execute()
+        
+        try:
+            result = self.supabase.rpc(
+                'match_summaries',
+                {
+                    'query_embedding': query_embedding,
+                    'match_threshold': threshold,
+                    'match_limit': limit  # Use the limit directly
+                }
+            ).execute()
+            
+            return result.data if result.data else []
                 
-                if batch.data:
-                    results.extend(batch.data)
-                
-                if len(batch.data) < batch_size:
-                    break
-                    
-            except Exception as e:
-                print(f"Error in summaries batch at {offset}: {str(e)}")
-                continue
+        except Exception as e:
+            print(f"Error in summaries search: {str(e)}")
+            return []
 
-        results.sort(key=lambda x: x.get('similarity', 0), reverse=True)
-        return results[:limit]
+    def search_feature_requests_text(self, query: str, threshold: float = 0.5, limit: int = 5) -> List[Dict]:
+        """Search feature requests with text search"""
+        try:
+            result = self.supabase.rpc(
+                'match_feature_requests_text',
+                {
+                    'query_text': query,
+                    'match_limit': limit
+                }
+            ).execute()
+            return result.data if result.data else []
+        except Exception as e:
+            print(f"Error in feature requests text search: {str(e)}")
+            return []
 
     def search_feature_requests(self, query: str, threshold: float = 0.5, limit: int = 5) -> List[Dict]:
-        """Search feature requests with date filtering"""
+        """Search feature requests with better error handling"""
         query_embedding = self.embeddings.embed_query(query)
         
-        # Add date filtering to reduce search space
-        three_months_ago = datetime.now() - timedelta(days=90)
-        
-        results = []
-        batch_size = 2
-        
-        for offset in range(0, limit, batch_size):
-            try:
-                batch = self.supabase.rpc(
-                    'match_recent_feature_requests',  # New function with date filter
-                    {
-                        'query_embedding': query_embedding,
-                        'match_threshold': threshold,
-                        'match_limit': batch_size,
-                        'start_date': three_months_ago.isoformat()
-                    }
-                ).execute()
+        try:
+            result = self.supabase.rpc(
+                'match_feature_requests',
+                {
+                    'query_embedding': query_embedding,
+                    'match_threshold': threshold,
+                    'match_limit': limit
+                }
+            ).execute()
+            
+            return result.data if result.data else []
                 
-                if batch.data:
-                    results.extend(batch.data)
-                
-                if len(batch.data) < batch_size:
-                    break
-                    
-            except Exception as e:
-                print(f"Error in batch starting at {offset}: {str(e)}")
-                continue
-        
-        # Sort by similarity and limit to requested amount
-        results.sort(key=lambda x: x.get('similarity', 0), reverse=True)
-        return results[:limit]
+        except Exception as e:
+            if "timeout" in str(e).lower():
+                print("Search timed out, trying with higher threshold...")
+                # Try again with a higher threshold
+                try:
+                    result = self.supabase.rpc(
+                        'match_feature_requests',
+                        {
+                            'query_embedding': query_embedding,
+                            'match_threshold': 0.8,  # Much higher threshold
+                            'match_limit': limit
+                        }
+                    ).execute()
+                    return result.data if result.data else []
+                except:
+                    pass
+            print(f"Error in feature requests search: {str(e)}")
+            return []
