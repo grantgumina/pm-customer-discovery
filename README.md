@@ -6,6 +6,8 @@ An intelligent assistant for exploring and analyzing Gong call transcripts using
 
 Gong Call Explorer processes Gong call transcripts and allows natural language querying of call content, summaries, and feature requests. It uses OpenAI embeddings for semantic search and ChatGPT for natural language understanding and response generation.
 
+![alt text](screenshot.png)
+
 ## Project Files
 
 - `cli_chat.py` - Main CLI interface for interacting with the assistant
