@@ -23,18 +23,19 @@ def main():
     processor = CallProcessor(supabase)
 
     # Get calls from Gong
-    from_date = datetime(2024, 10, 1)
-    to_date = datetime(2024, 12, 31)
+    from_date = datetime(2024, 5, 1)
+    to_date = datetime(2024, 10, 1)
     calls = gong.get_calls(from_date, to_date)
 
     # Process each call
     for call in calls:
+        print(f"Call\n{call}")
         if call.get("duration", 0) > 10:  # Skip short calls
             # Get transcript
             transcript_data = gong.get_transcript(call["id"])
             
             # Extract and analyze
-            transcript_text = processor.extract_transcript_text(transcript_data)
+            transcript_text = processor.extracxt_transcript_text(transcript_data)
 
             analysis = processor.analyze_transcript(transcript_text)
             
